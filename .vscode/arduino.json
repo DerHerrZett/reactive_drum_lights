@@ -1,0 +1,11 @@
+{
+    "board": "arduino:avr:uno",
+    "port": "COM3",
+    "sketch": "drum_light_main.ino",
+    "buildPreferences": [
+        [
+            "build.extra_flags",
+            "-D__AVR_ATmega2560__"
+        ]
+    ]
+}
