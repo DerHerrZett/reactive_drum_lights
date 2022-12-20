@@ -1,6 +1,6 @@
 /***
  * =================
- * Second Prototype
+ * Third Prototype
  * =================
  */
 
@@ -18,6 +18,9 @@ MIDI_CREATE_DEFAULT_INSTANCE();
 Adafruit_PWMServoDriver pwm_0 = Adafruit_PWMServoDriver(0x40);
 Adafruit_PWMServoDriver pwm_1 = Adafruit_PWMServoDriver(0x41);
 unsigned short NPINS = 32;
+
+class Color;
+class Channel;
 
 float set_pin(int pin, int value)
 /*
@@ -45,36 +48,139 @@ const unsigned long fadeout_length = 270;
  */
 bool QUICK_COLOR_ASSIGNMENT = true;
 
+class Color
 /**
- * These are the colors to be used. Completely random colors would not look nice.
+ * @brief RGB-Color Class
  *
- * It includes off/black as the first element for convenience. During the note triggering
- * black is never chosen (random choice starts at index 1)
- */
-#define NCOLORS 8
-static unsigned short my_colors[NCOLORS][3] = {
-    {0, 0, 0},
-    {0, 0, 4095},
-    {0, 4095, 0},
-    {4095, 0, 0},
-    {4095, 4095, 0},
-    {4095, 0, 4095},
-    {0, 4095, 4095},
-    {4095, 4095, 4095}};
-
-struct channel
-/**
- * Channel struct to hold all relevant information about each channels.
+ * Abstraction for easy color definition and setting.
+ *
+ * Default constructor gives black (all components 0)
+ *
  */
 {
-    const unsigned short channel_id;
-    const unsigned short red_pin_number;
-    const unsigned short green_pin_number;
-    const unsigned short blue_pin_number;
-    unsigned short red_component;
-    unsigned short green_component;
-    unsigned short blue_component;
-    unsigned long on_cycles_remaining;
+public:
+    Color()
+    {
+        red_component = 0;
+        green_component = 0;
+        blue_component = 0;
+    }
+    Color(unsigned short in_red_component, unsigned short in_green_component, unsigned short in_blue_component)
+    {
+        red_component = in_red_component;
+        green_component = in_green_component;
+        blue_component = in_blue_component;
+    }
+    int red_component;
+    int green_component;
+    int blue_component;
+};
+
+/**
+ * These are the colors to be used.
+ *
+ * It includes off/black as the first element for convenience. During the note triggering
+ * black is never actually chosen (random choice starts at index 1)
+ */
+
+Color get_random_color()
+/**
+ * @brief Get a random color from a pre-defined set of colors
+ * Completely random colors would not look nice.
+ *
+ */
+{
+    unsigned short NCOLORS = 7;
+    Color my_colors[NCOLORS] = {
+        Color(0, 0, 4095),
+        Color(0, 4095, 0),
+        Color(4095, 0, 0),
+        Color(4095, 4095, 0),
+        Color(4095, 0, 4095),
+        Color(0, 4095, 4095),
+        Color(4095, 4095, 4095)};
+
+    unsigned short current_color_index = random(0, NCOLORS - 1);
+    return my_colors[current_color_index];
+};
+
+class Channel
+{
+public:
+    Color current_color;
+    bool valid_channel = true;
+
+    Channel(
+        unsigned short in_r_pin,
+        unsigned short in_g_pin,
+        unsigned short in_b_pin,
+        unsigned short in_on_cycles = 300,
+        unsigned short in_fadecout_cycles = 270)
+    {
+        pins[0] = in_r_pin;
+        pins[1] = in_g_pin;
+        pins[2] = in_b_pin;
+        on_cycles = in_on_cycles;
+        fadeout_cycles = in_fadecout_cycles;
+    };
+
+    void Channel::trigger()
+    {
+        // Only assign a new color, if the old one has completely faded
+        // OR if QUICK_COLOR_ASSIGNMENT is true.
+        if (remaining_cycles == 0 || QUICK_COLOR_ASSIGNMENT)
+        {
+            current_color = get_random_color();
+        }
+        // Restart the counter
+        remaining_cycles = on_cycles;
+
+        // Progress for full brightness write to analog
+        progress();
+    }
+
+    float Channel::get_fadeout_factor()
+    /**
+     * @brief Get the light fading factor for analog Write.
+     *
+     * If the fadeout time has not yet started, give full brightness (1.0).
+     * During fadeout, reduce linearly from 1.0 to 0.
+     */
+    {
+        if (remaining_cycles > fadeout_cycles)
+            return 1.0;
+        else
+            return remaining_cycles / (1.0 * fadeout_cycles);
+    }
+
+    void Channel::progress()
+    /**
+     * @brief Counts down the cycles and fades out the light
+     *
+     */
+    {
+        float fadeout_factor = get_fadeout_factor();
+
+        current_color.red_component *= fadeout_factor;
+        current_color.green_component *= fadeout_factor;
+        current_color.blue_component *= fadeout_factor;
+
+        write_color_to_analog_out();
+        remaining_cycles--;
+    }
+
+    void Channel::write_color_to_analog_out()
+    {
+        set_pin(pins[0], current_color.red_component);
+        set_pin(pins[1], current_color.green_component);
+        set_pin(pins[2], current_color.blue_component);
+    }
+
+private:
+    unsigned short pins[3];
+    unsigned short on_cycles;
+    unsigned short fadeout_cycles;
+    unsigned short remaining_cycles;
 };
 
 /**
@@ -82,13 +188,24 @@ struct channel
  * TODO: Add and configure one channel for every trigger
  */
 #define NCHANNELS 1
-struct channel tom_1 = {4, 0, 1, 2, 0, 0, 0, 0};
+Channel tom_1(0, 1, 2);
 
 /**
  * Collect all channels in one array for convenient looping later on.
  */
-struct channel channels[NCHANNELS] = {
+Channel channels[NCHANNELS] = {
     tom_1};
+
+Channel get_channel_from_midi_note(byte note)
+{
+    if ((note == 0x30) || (note == 0x32))
+        return tom_1;
+
+    // In case channel is not found, return replacement value
+    Channel notFound(-1, -1, -1, -1);
+    notFound.valid_channel = false;
+    return notFound;
+}
 
 int get_channel_id_from_midi_note(byte note)
 /**
@@ -160,94 +277,26 @@ void setup()
     }
 }
 
-float get_fading_factor(struct channel chan)
-/**
- * Get the light fading factor for analog Write.
- * If the fadeout time has not yet started, give full brightness (1.0).
- * During fadeout, reduce linearly from 1.0 to 0.
- */
-{
-    if (chan.on_cycles_remaining > fadeout_length)
-    {
-        return 1.0;
-    }
-    return chan.on_cycles_remaining / (1.0 * fadeout_length);
-}
-
 void NoteOnHandle(byte channel, byte pitch, byte velocity)
 /**
  * Main functionality: What happens, when a midi note is detected
  */
 {
-    short int current_output_channel = get_channel_id_from_midi_note(pitch);
+    Channel current_output_channel = get_channel_from_midi_note(pitch);
 
-    for (int i = 0; i < NCHANNELS; i++)
+    // If no channel for the mido note was found, return (i.e. do nothing)
+    if (current_output_channel.valid_channel == false)
     {
-        /**
-         * When a channel is triggered ...
-         */
-        if (channels[i].channel_id == current_output_channel)
-        {
-            /**
-             *  ... start the cycle countdown ...
-             */
-            channels[i].on_cycles_remaining = on_cycles_max;
-            /**
-             * ... but only assign a color, when none was assigned yet.
-             */
-            if (QUICK_COLOR_ASSIGNMENT || ((channels[i].red_component + channels[i].green_component + channels[i].blue_component) == 0))
-            {
-                unsigned short current_color_index = random(1, NCOLORS - 1);
-                channels[i].red_component = my_colors[current_color_index][0];
-                channels[i].green_component = my_colors[current_color_index][1];
-                channels[i].blue_component = my_colors[current_color_index][2];
-            }
-        }
+        return;
     }
+    current_output_channel.trigger();
 }
 
 void loop()
-/**
- * Main loop where everything comes together
- */
 {
     MIDI.read(); // This calls the NoteOnHandle when appropriate
-
     for (int i = 0; i < NCHANNELS; i++)
     {
-        /**
-         * When the cycle countdown has not reached 0 yet ...
-         */
-        if (channels[i].on_cycles_remaining > 0)
-        {
-            /**
-             *  ... write the appropriate brightness ...
-             */
-            float fading_factor = get_fading_factor(channels[i]);
-            // float fading_factor = 1.0;
-            set_pin(channels[i].red_pin_number, int(fading_factor * channels[i].red_component));
-            set_pin(channels[i].green_pin_number, int(fading_factor * channels[i].green_component));
-            set_pin(channels[i].blue_pin_number, int(fading_factor * channels[i].blue_component));
-            /**
-             * ... and reduce the counter by one
-             */
-            channels[i].on_cycles_remaining -= 1;
-        }
-        else
-        {
-            /**
-             * Switch off when the cycle countdown has elapsed.
-             * INVESTIGATE: This might be superfluous, as <fading_factor> will be 0.0, thus setting the pins to 0.
-             */
-            set_pin(channels[i].red_pin_number, 0);
-            set_pin(channels[i].green_pin_number, 0);
-            set_pin(channels[i].blue_pin_number, 0);
-            /**
-             * And reset the color to 0, so that a new color is assigned during the next initial trigger
-             */
-            channels[i].red_component = 0;
-            channels[i].green_component = 0;
-            channels[i].blue_component = 0;
-        }
+        channels[i].progress();
     }
 }

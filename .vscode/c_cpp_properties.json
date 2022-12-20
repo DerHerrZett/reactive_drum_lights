@@ -34,7 +34,6 @@
                 "ARDUINO=10818",
                 "ARDUINO_AVR_UNO",
                 "ARDUINO_ARCH_AVR",
-                "__AVR_ATmega2560__",
                 "__DBL_MIN_EXP__=(-125)",
                 "__HQ_FBIT__=15",
                 "__cpp_attributes=200809",
